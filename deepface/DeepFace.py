@@ -326,6 +326,98 @@ def stream(db_path, model_name='VGG-Face', distance_metric='cosine', enable_face
     realtime.analysis(db_path, model_name, distance_metric, enable_face_analysis)
 
 
+def analysis(img_input, models=None):
+    # TODO: try to only load model once
+    tic = time.time()
+
+    if 'emotion' in models:
+        emotion_model = models['emotion']
+    else:
+        emotion_model = Emotion.loadModel()
+
+    if 'age' in models:
+        age_model = models['age']
+    else:
+        age_model = Age.loadModel()
+
+    if 'gender' in models:
+        gender_model = models['gender']
+    else:
+        gender_model = Gender.loadModel()
+
+    open_cv_path = functions.get_opencv_path()
+    face_detector_path = open_cv_path + "haarcascade_frontalface_default.xml"
+    face_cascade = cv2.CascadeClassifier(face_detector_path)
+    print("Face detector model loaded")
+    toc = time.time()
+    print("Facial attribute analysis models loaded in ", toc - tic, " seconds")
+
+    input_shape = (224, 224)
+    # Results: a list of image list of face dict
+    results = []
+    if type(img_input) == list:
+        images = img_input.copy()
+    else:
+        images = [img_input]
+    for img in images:
+        if len(img) > 11 and img[0:11] == "data:image/":
+            img = loadBase64Img(img)
+        elif type(img).__module__ != np.__name__:
+            # Check if is file path
+            if not os.path.isfile(img):
+                raise ValueError("Confirm that ", img, " exists")
+            img = cv2.imread(img)
+
+        raw_img = img.copy()
+
+        image_result = []
+        face_bboxes = face_cascade.detectMultiScale(img, 1.3, 5)
+        for (x, y, w, h) in face_bboxes:
+            face_result = {
+                'bbox_x': int(x),
+                'bbox_y': int(y),
+                'bbox_w': int(w),
+                'bbox_h': int(h)
+            }
+            # crop face by bbox
+            cropped_face = raw_img[y:y + h, x:x + w]
+
+            # TODO: Maybe we don't need to detect twice?
+            # emotion
+            gray_img = functions.detectFace(cropped_face, (48, 48), True)
+            emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
+            emotion_predictions = emotion_model.predict(gray_img)[0, :]
+            sum_of_predictions = emotion_predictions.sum()
+            emotion_result = []
+            for i, emotion_label in enumerate(emotion_labels):
+                emotion_prediction = emotion_predictions[i] / sum_of_predictions
+                emotion_result.append({
+                    'category': emotion_label,
+                    'score': float(emotion_prediction)
+                })
+            face_result['emotion'] = sorted(
+                emotion_result, key=lambda k: k['score'], reverse=True)
+
+            # TODO: Maybe we don't need to detect twice?
+            # age
+            face_224 = functions.detectFace(cropped_face, input_shape, False)
+            age_predictions = age_model.predict(face_224)[0, :]
+            apparent_age = Age.findApparentAge(age_predictions)
+            face_result['age'] = math.floor(apparent_age)
+
+            # gender
+            gender_prediction = gender_model.predict(face_224)[0, :]
+            if np.argmax(gender_prediction) == 0:
+                gender = 'F'
+            else:
+                gender = 'M'
+            face_result['gender'] = gender
+
+            image_result.append(face_result)
+        results.append(image_result)
+    return results
+
+
 # ---------------------------
 
 functions.allocateMemory()
