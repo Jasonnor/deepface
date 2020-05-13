@@ -134,8 +134,35 @@ def analyze():
 
 	return resp_obj, 200
 
-@app.route('/verify', methods=['POST'])
 
+@app.route('/analysis', methods=['POST'])
+def analysis():
+	global graph
+	tic = time.time()
+	req = request.get_json()
+	trx_id = uuid.uuid4()
+	with graph.as_default():
+		instances = []
+		if "img" in list(req.keys()):
+			raw_content = req["img"]  # list
+			for item in raw_content:  # item is in type of dict
+				instances.append(item)
+		if len(instances) == 0:
+			return jsonify({'success': False, 'error': 'you must pass at least one img object in your request'}), 205
+		print("Analyzing ", len(instances), " instances")
+		results = DeepFace.analysis(instances, models=facial_attribute_models)
+	toc = time.time()
+	time_cost = toc - tic
+	print("Analyze id {} done, time cost: {:.2f}".format(trx_id, time_cost))
+	response = {
+		'result': results,
+		'trx_id': str(trx_id),
+		'time_cost': time_cost
+	}
+	return response, 200
+
+
+@app.route('/verify', methods=['POST'])
 def verify():
 	
 	global graph
